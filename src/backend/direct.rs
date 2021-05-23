@@ -648,6 +648,12 @@ impl crate::Context for Context {
         ))
     }
 
+    fn init_from_raw(raw_instance: wgc::instance::RawInstance) -> Self {
+        Self(unsafe {
+            wgc::hub::Global::from_raw("wgpu", wgc::hub::IdentityManagerFactory, raw_instance)
+        })
+    }
+
     fn instance_create_surface(
         &self,
         handle: &impl raw_window_handle::HasRawWindowHandle,
@@ -665,6 +671,17 @@ impl crate::Context for Context {
                 compatible_surface: options.compatible_surface.map(|surface| surface.id),
             },
             wgc::instance::AdapterInputs::Mask(wgt::BackendBit::all(), |_| PhantomData),
+        );
+        ready(id.ok())
+    }
+
+    unsafe fn instance_add_raw_adapter(
+        &self,
+        raw_adapter: wgc::instance::RawAdapter,
+    ) -> Self::RequestAdapterFuture {
+        let id = self.0.add_raw_adapter(
+            wgc::instance::AdapterInputs::Mask(raw_adapter.backend_bit(), |_| PhantomData),
+            raw_adapter,
         );
         ready(id.ok())
     }
@@ -689,6 +706,32 @@ impl crate::Context for Context {
             &desc.map_label(|l| l.map(Borrowed)),
             trace_dir,
             PhantomData
+        ));
+        if let Some(err) = error {
+            self.handle_error_fatal(err, "Adapter::request_device");
+        }
+        let device = Device {
+            id: device_id,
+            error_sink: Arc::new(Mutex::new(ErrorSinkRaw::new())),
+            features: desc.features,
+        };
+        ready(Ok((device, device_id)))
+    }
+
+    unsafe fn adapter_request_raw_device(
+        &self,
+        adapter: &Self::AdapterId,
+        desc: &crate::DeviceDescriptor,
+        trace_dir: Option<&std::path::Path>,
+        raw_gpu: wgc::instance::RawGpu,
+    ) -> Self::RequestDeviceFuture {
+        let global = &self.0;
+        let (device_id, error) = wgc::gfx_select!(*adapter => global.adapter_request_raw_device(
+            *adapter,
+            &desc.map_label(|l| l.map(Borrowed)),
+            trace_dir,
+            PhantomData,
+            raw_gpu
         ));
         if let Some(err) = error {
             self.handle_error_fatal(err, "Adapter::request_device");
@@ -1425,6 +1468,43 @@ impl crate::Context for Context {
         if let Some(cause) = error {
             self.handle_error(
                 &texture.error_sink,
+                cause,
+                LABEL,
+                desc.label,
+                "Texture::create_view",
+            );
+        }
+        id
+    }
+
+    fn device_create_texture_view_from_raw(
+        &self,
+        device: &Self::DeviceId,
+        raw_image_view: wgc::instance::RawImageView,
+        desc: &TextureViewDescriptor,
+    ) -> Self::TextureViewId {
+        // FIXME abstract with texture_create_view
+        let descriptor = wgc::resource::TextureViewDescriptor {
+            label: desc.label.map(Borrowed),
+            format: desc.format,
+            dimension: desc.dimension,
+            aspect: desc.aspect,
+            base_mip_level: desc.base_mip_level,
+            mip_level_count: desc.mip_level_count,
+            base_array_layer: desc.base_array_layer,
+            array_layer_count: desc.array_layer_count,
+        };
+        let global = &self.0;
+        let (id, error) = wgc::gfx_select!(device.id => global.device_create_texture_view_from_raw(
+            device.id,
+            raw_image_view,
+            &descriptor,
+            PhantomData
+        ));
+
+        if let Some(cause) = error {
+            self.handle_error(
+                &device.error_sink,
                 cause,
                 LABEL,
                 desc.label,

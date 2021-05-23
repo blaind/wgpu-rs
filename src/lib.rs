@@ -24,6 +24,7 @@ use std::{
 
 use parking_lot::Mutex;
 
+use wgc::instance::RawGpu;
 pub use wgt::{
     AdapterInfo, AddressMode, Backend, BackendBit, BindGroupLayoutEntry, BindingType,
     BlendComponent, BlendFactor, BlendOperation, BlendState, BufferAddress, BufferBindingType,
@@ -184,6 +185,8 @@ trait Context: Debug + Send + Sized + Sync {
     type MapAsyncFuture: Future<Output = Result<(), BufferAsyncError>> + Send;
 
     fn init(backends: BackendBit) -> Self;
+    fn init_from_raw(raw_instance: wgc::instance::RawInstance) -> Self;
+
     fn instance_create_surface(
         &self,
         handle: &impl raw_window_handle::HasRawWindowHandle,
@@ -192,11 +195,22 @@ trait Context: Debug + Send + Sized + Sync {
         &self,
         options: &RequestAdapterOptions<'_>,
     ) -> Self::RequestAdapterFuture;
+    unsafe fn instance_add_raw_adapter(
+        &self,
+        raw_adapter: wgc::instance::RawAdapter,
+    ) -> Self::RequestAdapterFuture;
     fn adapter_request_device(
         &self,
         adapter: &Self::AdapterId,
         desc: &DeviceDescriptor,
         trace_dir: Option<&std::path::Path>,
+    ) -> Self::RequestDeviceFuture;
+    unsafe fn adapter_request_raw_device(
+        &self,
+        adapter: &Self::AdapterId,
+        desc: &crate::DeviceDescriptor,
+        trace_dir: Option<&std::path::Path>,
+        raw_gpu: wgc::instance::RawGpu,
     ) -> Self::RequestDeviceFuture;
     fn instance_poll_all_devices(&self, force_wait: bool);
     fn adapter_get_swap_chain_preferred_format(
@@ -315,6 +329,13 @@ trait Context: Debug + Send + Sized + Sync {
     fn texture_create_view(
         &self,
         texture: &Self::TextureId,
+        desc: &TextureViewDescriptor,
+    ) -> Self::TextureViewId;
+
+    fn device_create_texture_view_from_raw(
+        &self,
+        device: &Self::DeviceId,
+        raw_image_view: wgc::instance::RawImageView,
         desc: &TextureViewDescriptor,
     ) -> Self::TextureViewId;
 
@@ -1360,6 +1381,13 @@ impl Instance {
         }
     }
 
+    /// TODO
+    pub unsafe fn from_raw(raw_instance: wgc::instance::RawInstance) -> Self {
+        Instance {
+            context: Arc::new(C::init_from_raw(raw_instance)),
+        }
+    }
+
     /// Retrieves all available [`Adapter`]s that match the given [`BackendBit`].
     ///
     /// # Arguments
@@ -1388,6 +1416,16 @@ impl Instance {
     ) -> impl Future<Output = Option<Adapter>> + Send {
         let context = Arc::clone(&self.context);
         let adapter = self.context.instance_request_adapter(options);
+        async move { adapter.await.map(|id| Adapter { context, id }) }
+    }
+
+    /// TODO
+    pub unsafe fn add_raw_adapter(
+        &self,
+        raw_adapter: wgc::instance::RawAdapter,
+    ) -> impl Future<Output = Option<Adapter>> + Send {
+        let context = Arc::clone(&self.context);
+        let adapter = self.context.instance_add_raw_adapter(raw_adapter);
         async move { adapter.await.map(|id| Adapter { context, id }) }
     }
 
@@ -1451,6 +1489,37 @@ impl Adapter {
     ) -> impl Future<Output = Result<(Device, Queue), RequestDeviceError>> + Send {
         let context = Arc::clone(&self.context);
         let device = Context::adapter_request_device(&*self.context, &self.id, desc, trace_path);
+        async move {
+            device.await.map(|(device_id, queue_id)| {
+                (
+                    Device {
+                        context: Arc::clone(&context),
+                        id: device_id,
+                    },
+                    Queue {
+                        context,
+                        id: queue_id,
+                    },
+                )
+            })
+        }
+    }
+
+    /// TODO
+    pub unsafe fn add_raw_device(
+        &self,
+        desc: &DeviceDescriptor,
+        trace_path: Option<&std::path::Path>,
+        raw_gpu: wgc::instance::RawGpu,
+    ) -> impl Future<Output = Result<(Device, Queue), RequestDeviceError>> + Send {
+        let context = Arc::clone(&self.context);
+        let device = Context::adapter_request_raw_device(
+            &*self.context,
+            &self.id,
+            desc,
+            trace_path,
+            raw_gpu,
+        );
         async move {
             device.await.map(|(device_id, queue_id)| {
                 (
@@ -1624,6 +1693,24 @@ impl Device {
         Texture {
             context: Arc::clone(&self.context),
             id: Context::device_create_texture(&*self.context, &self.id, desc),
+            owned: true,
+        }
+    }
+
+    // TODO
+    pub fn create_texture_view_from_raw(
+        &self,
+        raw_image_view: wgc::instance::RawImageView,
+        desc: &TextureViewDescriptor,
+    ) -> TextureView {
+        TextureView {
+            context: Arc::clone(&self.context),
+            id: Context::device_create_texture_view_from_raw(
+                &*self.context,
+                &self.id,
+                raw_image_view,
+                desc,
+            ),
             owned: true,
         }
     }
