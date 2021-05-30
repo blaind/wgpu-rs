@@ -1481,24 +1481,26 @@ impl crate::Context for Context {
         &self,
         device: &Self::DeviceId,
         raw_image_view: wgc::instance::RawImageView,
-        desc: &TextureViewDescriptor,
+        texture_desc: &TextureDescriptor,
+        texture_view_desc: &TextureViewDescriptor,
     ) -> Self::TextureViewId {
         // FIXME abstract with texture_create_view
-        let descriptor = wgc::resource::TextureViewDescriptor {
-            label: desc.label.map(Borrowed),
-            format: desc.format,
-            dimension: desc.dimension,
-            aspect: desc.aspect,
-            base_mip_level: desc.base_mip_level,
-            mip_level_count: desc.mip_level_count,
-            base_array_layer: desc.base_array_layer,
-            array_layer_count: desc.array_layer_count,
+        let texture_view_descriptor = wgc::resource::TextureViewDescriptor {
+            label: texture_view_desc.label.map(Borrowed),
+            format: texture_view_desc.format,
+            dimension: texture_view_desc.dimension,
+            aspect: texture_view_desc.aspect,
+            base_mip_level: texture_view_desc.base_mip_level,
+            mip_level_count: texture_view_desc.mip_level_count,
+            base_array_layer: texture_view_desc.base_array_layer,
+            array_layer_count: texture_view_desc.array_layer_count,
         };
         let global = &self.0;
         let (id, error) = wgc::gfx_select!(device.id => global.device_create_texture_view_from_raw(
             device.id,
             raw_image_view,
-            &descriptor,
+            &texture_desc.map_label(|l| l.map(Borrowed)),
+            &texture_view_descriptor,
             PhantomData
         ));
 
@@ -1507,7 +1509,7 @@ impl crate::Context for Context {
                 &device.error_sink,
                 cause,
                 LABEL,
-                desc.label,
+                texture_view_desc.label,
                 "Texture::create_view",
             );
         }

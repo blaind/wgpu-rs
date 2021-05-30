@@ -336,7 +336,8 @@ trait Context: Debug + Send + Sized + Sync {
         &self,
         device: &Self::DeviceId,
         raw_image_view: wgc::instance::RawImageView,
-        desc: &TextureViewDescriptor,
+        texture_desc: &TextureDescriptor,
+        texture_view_desc: &TextureViewDescriptor,
     ) -> Self::TextureViewId;
 
     fn surface_drop(&self, surface: &Self::SurfaceId);
@@ -1697,11 +1698,21 @@ impl Device {
         }
     }
 
-    // TODO
+    /// TODO
+    pub fn create_texture_from_raw(&self, desc: &TextureDescriptor) -> Texture {
+        Texture {
+            context: Arc::clone(&self.context),
+            id: Context::device_create_texture(&*self.context, &self.id, desc),
+            owned: true,
+        }
+    }
+
+    /// TODO
     pub fn create_texture_view_from_raw(
         &self,
         raw_image_view: wgc::instance::RawImageView,
-        desc: &TextureViewDescriptor,
+        texture_desc: &TextureDescriptor,
+        texture_view_desc: &TextureViewDescriptor,
     ) -> TextureView {
         TextureView {
             context: Arc::clone(&self.context),
@@ -1709,7 +1720,8 @@ impl Device {
                 &*self.context,
                 &self.id,
                 raw_image_view,
-                desc,
+                texture_desc,
+                texture_view_desc,
             ),
             owned: true,
         }
